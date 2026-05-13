@@ -1,0 +1,46 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check syntax
+        run: python -c "import ast; [ast.parse(open(f).read()) or print(f'{f}: OK') for f in ['app.py', 'data.py']]"
+
+      - name: Verify app imports cleanly
+        run: python -c "import app" 2>&1 | grep -v "^Fetching\|^Loaded\|^Dashboard" || true
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}")
+          echo "Render response: $response"
+          if [ "$response" != "201" ]; then
+            echo "Deploy hook failed with status $response"
+            exit 1
+          fi
