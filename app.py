@@ -1,6 +1,8 @@
 import sys
 import traceback
 
+import numpy as np
+from statsmodels.nonparametric.smoothers_lowess import lowess
 import dash
 from dash import dcc, html
 import plotly.graph_objects as go
@@ -25,9 +27,9 @@ DECADE_COLORS = {
 UNEMPLOYMENT_COLOR = "#3b82f6"
 INFLATION_COLOR = "#ef4444"
 
-BACKGROUND = "#0f172a"
-SURFACE = "#1e293b"
-BORDER = "#334155"
+BACKGROUND = "#1a2a3f"
+SURFACE = "#243548"
+BORDER = "#3d536e"
 TEXT_PRIMARY = "#f1f5f9"
 TEXT_MUTED = "#94a3b8"
 
@@ -134,26 +136,66 @@ def build_time_series(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def _hyperbolic_curve(x_vals, y_vals, n=200):
+    """Fit π = a/u + b and return (x_range, y_range) for plotting."""
+    a, b = np.polyfit(1.0 / x_vals, y_vals, 1)
+    x_range = np.linspace(x_vals.min(), x_vals.max(), n)
+    return x_range, a / x_range + b
+
+
+def _event_traces(df, window_start, window_end, pick, text, dx, dy, legendgroup):
+    """
+    Return (arrow_line_trace, label_trace) for an event annotation.
+    Both share legendgroup so they hide/show with the decade toggle.
+    dx/dy are offsets in data coordinates from the anchor point to the label.
+    """
+    window = df.loc[window_start:window_end]
+    if window.empty:
+        return []
+    row = window.loc[window["inflation"].idxmax() if pick == "max_inflation"
+                     else window["unemployment"].idxmax()]
+    x0, y0 = row["unemployment"], row["inflation"]
+    x1, y1 = x0 + dx, y0 + dy
+
+    arrow = go.Scatter(
+        x=[x0, x1], y=[y0, y1],
+        mode="lines",
+        line=dict(color=TEXT_MUTED, width=1),
+        legendgroup=legendgroup,
+        showlegend=False,
+        hoverinfo="skip",
+    )
+    label = go.Scatter(
+        x=[x1], y=[y1],
+        mode="text",
+        text=[text],
+        textfont=dict(family=FONT_FAMILY, size=10, color=TEXT_PRIMARY),
+        textposition="middle center",
+        legendgroup=legendgroup,
+        showlegend=False,
+        hoverinfo="skip",
+    )
+    return [arrow, label]
+
+
 def build_phillips_curve(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
+    # ── 1. Decade scatter dots ────────────────────────────────────────────────
     for decade, color in DECADE_COLORS.items():
         subset = df[df["decade"] == decade]
         if subset.empty:
             continue
-
         fig.add_trace(
             go.Scatter(
                 x=subset["unemployment"],
                 y=subset["inflation"],
                 mode="markers",
                 name=decade,
-                marker=dict(
-                    color=color,
-                    size=5,
-                    opacity=0.75,
-                    line=dict(width=0),
-                ),
+                legendgroup=decade,
+                legendgrouptitle=dict(text="Decade", font=dict(color=TEXT_MUTED, size=11))
+                if decade == "1960s" else None,
+                marker=dict(color=color, size=5, opacity=0.7, line=dict(width=0)),
                 hovertemplate=(
                     "<b>%{customdata}</b><br>"
                     "Unemployment: %{x:.1f}%<br>"
@@ -163,21 +205,88 @@ def build_phillips_curve(df: pd.DataFrame) -> go.Figure:
             )
         )
 
-    fig.add_hline(
-        y=0,
-        line=dict(color=BORDER, width=1, dash="dot"),
+    # ── 2. LOWESS smooth curve through all data ───────────────────────────────
+    sorted_df = df.sort_values("unemployment")
+    smoothed = lowess(sorted_df["inflation"], sorted_df["unemployment"], frac=0.25, it=3)
+    fig.add_trace(
+        go.Scatter(
+            x=smoothed[:, 0],
+            y=smoothed[:, 1],
+            mode="lines",
+            name="Overall trend (LOWESS)",
+            legendgroup="lowess",
+            legendgrouptitle=dict(text="Trend Lines", font=dict(color=TEXT_MUTED, size=11)),
+            line=dict(color="#e2e8f0", width=2.5, dash="dash"),
+            hoverinfo="skip",
+        )
     )
+
+    # ── 3. Three era trend lines — tells WHY the curve changed ───────────────
+    eras = [
+        (
+            df[df["decade"] == "1960s"],
+            "Classic Phillips Curve",
+            "#a78bfa",
+        ),
+        (
+            df[df["decade"].isin(["1970s", "1980s"])],
+            "Stagflation Era — relationship breaks",
+            "#fb923c",
+        ),
+        (
+            df[df["decade"].isin(["1990s", "2000s", "2010s", "2020s"])],
+            "Modern Era — relationship flat",
+            "#34d399",
+        ),
+    ]
+    for era_df, name, color in eras:
+        x_r, y_r = _hyperbolic_curve(era_df["unemployment"].values, era_df["inflation"].values)
+        fig.add_trace(
+            go.Scatter(
+                x=x_r, y=y_r,
+                mode="lines",
+                name=name,
+                legendgroup=name,
+                line=dict(color=color, width=2.5),
+                hoverinfo="skip",
+            )
+        )
+
+    # ── 4. Event annotations as scatter traces (toggle with their decade) ─────
+    # dx/dy are data-coordinate offsets for the label relative to the anchor.
+    event_specs = [
+        ("1973-10", "1975-03", "max_inflation",
+         "<b>1970s Oil Crisis</b><br>Stagflation: high unemployment<br>AND high inflation",
+         2.2, 2.8, "1970s"),
+        ("2008-09", "2010-06", "max_unemployment",
+         "<b>2008 Financial Crisis</b><br>Unemployment → 10%<br>Inflation collapses",
+         -3.0, -3.2, "2000s"),
+        ("2021-06", "2022-12", "max_inflation",
+         "<b>Post-COVID 2021–22</b><br>Supply shock: inflation → 9%<br>while unemployment was falling",
+         2.0, 1.8, "2020s"),
+    ]
+    for spec in event_specs:
+        for trace in _event_traces(df, *spec):
+            fig.add_trace(trace)
+
+    fig.add_hline(y=0, line=dict(color=BORDER, width=1, dash="dot"))
 
     fig.update_layout(
         **PLOTLY_LAYOUT,
         title=dict(
-            text="Phillips Curve: Unemployment vs. Inflation by Decade",
+            text=(
+                "The Flattening Phillips Curve: "
+                "A 60-Year Story of Changing Economic Relationships"
+                "<br><span style='font-size:12px; color:#94a3b8; font-weight:400'>"
+                "Each dot represents one month of US economic data. Colored by decade."
+                "</span>"
+            ),
             font=dict(size=18, color=TEXT_PRIMARY),
             x=0.03,
         ),
         xaxis=dict(**AXIS_STYLE, title="Unemployment Rate (%)"),
         yaxis=dict(**AXIS_STYLE, title="CPI Inflation YoY (%)"),
-        legend=dict(**LEGEND_STYLE, title=dict(text="Decade", font=dict(color=TEXT_MUTED))),
+        legend=dict(**LEGEND_STYLE, groupclick="togglegroup"),
         hovermode="closest",
     )
 
