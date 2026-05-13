@@ -33,28 +33,24 @@ TEXT_MUTED = "#94a3b8"
 
 FONT_FAMILY = "'Inter', 'Helvetica Neue', Arial, sans-serif"
 
+AXIS_STYLE = dict(
+    gridcolor=BORDER,
+    linecolor=BORDER,
+    tickfont=dict(color=TEXT_MUTED),
+    title_font=dict(color=TEXT_MUTED),
+)
+
+LEGEND_STYLE = dict(
+    bgcolor="rgba(30,41,59,0.8)",
+    bordercolor=BORDER,
+    borderwidth=1,
+    font=dict(color=TEXT_PRIMARY),
+)
+
 PLOTLY_LAYOUT = dict(
     paper_bgcolor=BACKGROUND,
     plot_bgcolor=SURFACE,
     font=dict(family=FONT_FAMILY, color=TEXT_PRIMARY),
-    xaxis=dict(
-        gridcolor=BORDER,
-        linecolor=BORDER,
-        tickfont=dict(color=TEXT_MUTED),
-        title_font=dict(color=TEXT_MUTED),
-    ),
-    yaxis=dict(
-        gridcolor=BORDER,
-        linecolor=BORDER,
-        tickfont=dict(color=TEXT_MUTED),
-        title_font=dict(color=TEXT_MUTED),
-    ),
-    legend=dict(
-        bgcolor="rgba(30,41,59,0.8)",
-        bordercolor=BORDER,
-        borderwidth=1,
-        font=dict(color=TEXT_PRIMARY),
-    ),
     margin=dict(l=60, r=40, t=60, b=60),
     hoverlabel=dict(
         bgcolor=SURFACE,
@@ -127,22 +123,13 @@ def build_time_series(df: pd.DataFrame) -> go.Figure:
             x=0.03,
         ),
         hovermode="x unified",
-        legend=dict(**PLOTLY_LAYOUT["legend"], orientation="h", y=-0.12, x=0),
+        legend=dict(**LEGEND_STYLE, orientation="h", y=-0.12, x=0),
     )
     fig.update_layout(**layout)
 
-    fig.update_yaxes(
-        title_text="Unemployment Rate (%)",
-        secondary_y=False,
-        **PLOTLY_LAYOUT["yaxis"],
-    )
-    fig.update_yaxes(
-        title_text="CPI Inflation YoY (%)",
-        secondary_y=True,
-        **PLOTLY_LAYOUT["yaxis"],
-        zeroline=False,
-    )
-    fig.update_xaxes(**PLOTLY_LAYOUT["xaxis"])
+    fig.update_yaxes(title_text="Unemployment Rate (%)", secondary_y=False, **AXIS_STYLE)
+    fig.update_yaxes(title_text="CPI Inflation YoY (%)", secondary_y=True, zeroline=False, **AXIS_STYLE)
+    fig.update_xaxes(**AXIS_STYLE)
 
     return fig
 
@@ -188,18 +175,9 @@ def build_phillips_curve(df: pd.DataFrame) -> go.Figure:
             font=dict(size=18, color=TEXT_PRIMARY),
             x=0.03,
         ),
-        xaxis=dict(
-            **PLOTLY_LAYOUT["xaxis"],
-            title="Unemployment Rate (%)",
-        ),
-        yaxis=dict(
-            **PLOTLY_LAYOUT["yaxis"],
-            title="CPI Inflation YoY (%)",
-        ),
-        legend=dict(
-            **PLOTLY_LAYOUT["legend"],
-            title=dict(text="Decade", font=dict(color=TEXT_MUTED)),
-        ),
+        xaxis=dict(**AXIS_STYLE, title="Unemployment Rate (%)"),
+        yaxis=dict(**AXIS_STYLE, title="CPI Inflation YoY (%)"),
+        legend=dict(**LEGEND_STYLE, title=dict(text="Decade", font=dict(color=TEXT_MUTED))),
         hovermode="closest",
     )
 
